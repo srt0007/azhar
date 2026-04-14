@@ -46,6 +46,7 @@
   td { padding:.7rem 1rem; }
   td.trk { font-family:monospace; font-size:.82rem; color:var(--primary); font-weight:600; }
   td.amt { text-align:right; font-weight:600; color:#059669; font-family:monospace; }
+  td.amt.zero { color:#D1D5DB; font-weight:400; }
   .total-row td { background:var(--light); font-weight:700; border-top:2px solid var(--primary); }
   .spinner { width:36px; height:36px; border:4px solid var(--border); border-top:4px solid var(--primary);
              border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 1rem; }
@@ -162,25 +163,61 @@ async function processFiles() {
   } finally { btn.disabled=false; }
 }
 
+function pivot(rows) {
+  // Get ordered unique descriptions and tracking numbers
+  const descs = [...new Set(rows.map(r => r.description))];
+  const trackingOrder = [];
+  const map = {};
+  rows.forEach(r => {
+    if (!map[r.tracking_no]) { map[r.tracking_no] = {}; trackingOrder.push(r.tracking_no); }
+    map[r.tracking_no][r.description] = r.net_charges;
+  });
+  const trackings = [...new Set(trackingOrder)];
+  return { descs, trackings, map };
+}
+
 function renderTable(rows) {
   const tc = document.getElementById('table-container');
-  document.getElementById('row-count').textContent = `${rows.length} row${rows.length!==1?'s':''}`;
   if (!rows.length) {
+    document.getElementById('row-count').textContent = '0 rows';
     tc.innerHTML='<div class="empty"><div class="icon">🔍</div><p>No net charges found. Ensure PDFs are UPS invoices.</p></div>';
     return;
   }
-  const total = rows.reduce((s,r) => s+r.net_charges, 0);
+
+  const { descs, trackings, map } = pivot(rows);
+  document.getElementById('row-count').textContent = `${trackings.length} tracking no${trackings.length!==1?'s':''}`;
+
+  // Column totals
+  const colTotals = descs.map(d => trackings.reduce((s,t) => s + (map[t][d] || 0), 0));
+  const grandTotal = colTotals.reduce((s,v) => s+v, 0);
+
   tc.innerHTML = `
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Tracking No.</th><th>Description</th><th>Net Charges</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Tracking No.</th>
+            ${descs.map(d => `<th style="text-align:right">${esc(d)}</th>`).join('')}
+            <th style="text-align:right">Total</th>
+          </tr>
+        </thead>
         <tbody>
-          ${rows.map(r=>`<tr>
-            <td class="trk">${esc(r.tracking_no)}</td>
-            <td>${esc(r.description)}</td>
-            <td class="amt">${r.net_charges.toFixed(2)}</td>
-          </tr>`).join('')}
-          <tr class="total-row"><td colspan="2">Total</td><td class="amt">${total.toFixed(2)}</td></tr>
+          ${trackings.map(t => {
+            const rowTotal = descs.reduce((s,d) => s + (map[t][d] || 0), 0);
+            return `<tr>
+              <td class="trk">${esc(t)}</td>
+              ${descs.map(d => {
+                const v = map[t][d] || 0;
+                return `<td class="amt${v===0?' zero':''}">${v.toFixed(2)}</td>`;
+              }).join('')}
+              <td class="amt" style="border-left:2px solid #C4B5FD">${rowTotal.toFixed(2)}</td>
+            </tr>`;
+          }).join('')}
+          <tr class="total-row">
+            <td>Total</td>
+            ${colTotals.map(v => `<td class="amt">${v.toFixed(2)}</td>`).join('')}
+            <td class="amt" style="border-left:2px solid #9061F9">${grandTotal.toFixed(2)}</td>
+          </tr>
         </tbody>
       </table>
     </div>`;

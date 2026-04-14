@@ -122,41 +122,97 @@ def download():
     if not data:
         return jsonify({'error': 'No data'}), 400
 
+    # Pivot: one row per tracking number, one column per description
+    descs = list(dict.fromkeys(r['description'] for r in data))  # ordered unique
+    tracking_order, pivot = [], {}
+    for r in data:
+        tn = r['tracking_no']
+        if tn not in pivot:
+            pivot[tn] = {}
+            tracking_order.append(tn)
+        pivot[tn][r['description']] = r['net_charges']
+    trackings = list(dict.fromkeys(tracking_order))
+
     wb = Workbook()
     ws = wb.active
     ws.title = "UPS Invoice Data"
 
     hfill = PatternFill(start_color="351C75", end_color="351C75", fill_type="solid")
     hfont = Font(bold=True, color="FFFFFF", size=11)
+    tfill = PatternFill(start_color="EDE9FE", end_color="EDE9FE", fill_type="solid")
     afill = PatternFill(start_color="F3F0FF", end_color="F3F0FF", fill_type="solid")
-    border = Border(*[Side(style='thin', color='CCCCCC')] * 0,
-                    left=Side(style='thin'), right=Side(style='thin'),
+    zero_font = Font(color="D1D5DB", size=10)
+    border = Border(left=Side(style='thin'), right=Side(style='thin'),
                     top=Side(style='thin'), bottom=Side(style='thin'))
+    right = Alignment(horizontal='right', vertical='center')
+    center = Alignment(horizontal='center', vertical='center')
 
-    headers = ['Tracking No.', 'Description', 'Net Charges']
+    # Header row: Tracking No. | <desc1> | <desc2> | ... | Total
+    headers = ['Tracking No.'] + descs + ['Total']
     ws.row_dimensions[1].height = 32
     for col, h in enumerate(headers, 1):
         c = ws.cell(row=1, column=col, value=h)
         c.font = hfont
         c.fill = hfill
-        c.alignment = Alignment(horizontal='center', vertical='center')
+        c.alignment = center
         c.border = border
 
-    for i, item in enumerate(data, 2):
-        ws.cell(row=i, column=1, value=item['tracking_no']).border = border
-        ws.cell(row=i, column=2, value=item['description']).border = border
-        nc = ws.cell(row=i, column=3, value=item['net_charges'])
-        nc.number_format = '#,##0.00'
-        nc.alignment = Alignment(horizontal='right')
-        nc.border = border
+    # Data rows
+    for i, tn in enumerate(trackings, 2):
+        ws.row_dimensions[i].height = 20
+        ws.cell(row=i, column=1, value=tn).border = border
+        row_total = 0
+        for j, desc in enumerate(descs, 2):
+            val = pivot[tn].get(desc, 0)
+            row_total += val
+            c = ws.cell(row=i, column=j, value=val)
+            c.number_format = '#,##0.00'
+            c.alignment = right
+            c.border = border
+            if val == 0:
+                c.font = zero_font
+            if i % 2 == 0:
+                c.fill = afill
+        # Row total
+        tc = ws.cell(row=i, column=len(headers), value=row_total)
+        tc.number_format = '#,##0.00'
+        tc.alignment = right
+        tc.border = border
+        tc.font = Font(bold=True, size=10)
         if i % 2 == 0:
-            for col in range(1, 4):
-                ws.cell(row=i, column=col).fill = afill
+            tc.fill = afill
+        if i % 2 == 0:
+            ws.cell(row=i, column=1).fill = afill
 
-    ws.column_dimensions['A'].width = 26
-    ws.column_dimensions['B'].width = 38
-    ws.column_dimensions['C'].width = 15
-    ws.freeze_panes = 'A2'
+    # Totals row
+    total_row = len(trackings) + 2
+    ws.row_dimensions[total_row].height = 24
+    tc = ws.cell(row=total_row, column=1, value='Total')
+    tc.font = Font(bold=True, size=11)
+    tc.fill = tfill
+    tc.border = border
+    grand = 0
+    for j, desc in enumerate(descs, 2):
+        col_total = sum(pivot[tn].get(desc, 0) for tn in trackings)
+        grand += col_total
+        c = ws.cell(row=total_row, column=j, value=col_total)
+        c.number_format = '#,##0.00'
+        c.alignment = right
+        c.font = Font(bold=True, size=10)
+        c.fill = tfill
+        c.border = border
+    gc = ws.cell(row=total_row, column=len(headers), value=grand)
+    gc.number_format = '#,##0.00'
+    gc.alignment = right
+    gc.font = Font(bold=True, size=11)
+    gc.fill = tfill
+    gc.border = border
+
+    # Column widths
+    ws.column_dimensions[get_column_letter(1)].width = 26
+    for j in range(2, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(j)].width = 18
+    ws.freeze_panes = 'B2'
 
     out = io.BytesIO()
     wb.save(out)
