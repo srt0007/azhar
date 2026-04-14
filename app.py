@@ -19,9 +19,9 @@ def extract_data_from_pdf(pdf_bytes, filename=''):
 
     results = []
 
-    # Each shipment section ends with "Total Charges for Shipment <1Z...>"
+    # Each shipment section ends with "Total Charges 1Z... RS amount"
     # Use these markers to slice the text into per-shipment blocks
-    section_end = re.compile(r'Total Charges for Shipment\s+(1Z[A-Z0-9]{16})', re.IGNORECASE)
+    section_end = re.compile(r'Total Charges\s+(1Z[A-Z0-9]{16})', re.IGNORECASE)
     matches = list(section_end.finditer(full_text))
     if not matches:
         return results
@@ -62,7 +62,7 @@ def _parse_charges(section):
             continue
 
         # Stop at the section-end marker
-        if re.match(r'Total Charges for Shipment', line, re.IGNORECASE):
+        if re.match(r'Total Charges\s+1Z', line, re.IGNORECASE):
             break
 
         if not in_charges:
