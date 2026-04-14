@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UPS Invoice Parser</title>
+<style>
+  :root { --primary:#351C75; --light:#F3F0FF; --green:#10B981; --red:#EF4444; --border:#E5E7EB; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Segoe UI',sans-serif; background:#F8F7FF; color:#1A1A2E; }
+  header { background:linear-gradient(135deg,#351C75,#5E35B1); color:#fff; padding:1.25rem 2rem; }
+  header h1 { font-size:1.5rem; }
+  header p { opacity:.8; font-size:.9rem; margin-top:.2rem; }
+  .container { max-width:1100px; margin:2rem auto; padding:0 1.5rem; }
+  .card { background:#fff; border-radius:12px; padding:1.75rem; border:1px solid var(--border);
+          box-shadow:0 1px 4px rgba(0,0,0,.07); margin-bottom:1.5rem; }
+  .drop-zone { border:2px dashed #C4B5FD; border-radius:10px; padding:2.5rem;
+               text-align:center; cursor:pointer; transition:.2s; background:#FAFAFE; }
+  .drop-zone:hover,.drop-zone.over { border-color:var(--primary); background:var(--light); }
+  .drop-zone h3 { color:var(--primary); margin:.75rem 0 .4rem; }
+  .drop-zone p { color:#6B7280; font-size:.875rem; }
+  #file-input { display:none; }
+  .file-item { display:flex; align-items:center; gap:.75rem; padding:.65rem 1rem;
+               background:#F8F7FF; border-radius:8px; margin-top:.5rem; border:1px solid var(--border); }
+  .file-item .name { flex:1; font-size:.875rem; font-weight:500; }
+  .file-item .size { color:#9CA3AF; font-size:.8rem; }
+  .btn { display:inline-flex; align-items:center; gap:.4rem; padding:.65rem 1.25rem;
+         border-radius:8px; border:none; cursor:pointer; font-size:.9rem; font-weight:600; transition:.2s; }
+  .btn-primary { background:var(--primary); color:#fff; }
+  .btn-primary:hover { background:#5E35B1; box-shadow:0 3px 10px rgba(53,28,117,.3); }
+  .btn-primary:disabled { background:#9CA3AF; cursor:not-allowed; box-shadow:none; }
+  .btn-success { background:var(--green); color:#fff; }
+  .btn-success:hover { background:#059669; }
+  .btn-clear { background:#F3F4F6; color:#374151; }
+  .actions { display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.25rem; align-items:center; }
+  .results-head { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.75rem; margin-bottom:1rem; }
+  .results-head h2 { color:var(--primary); font-size:1.05rem; }
+  .badge { background:#FFB300; color:#1A1A2E; padding:.2rem .75rem; border-radius:20px; font-size:.8rem; font-weight:700; }
+  .table-wrap { overflow-x:auto; border-radius:8px; border:1px solid var(--border); }
+  table { width:100%; border-collapse:collapse; font-size:.875rem; }
+  thead th { background:var(--primary); color:#fff; padding:.8rem 1rem; font-weight:600; }
+  thead th:last-child { text-align:right; }
+  tbody tr { border-bottom:1px solid var(--border); }
+  tbody tr:hover { background:var(--light); }
+  tbody tr:last-child { border:none; }
+  td { padding:.7rem 1rem; }
+  td.trk { font-family:monospace; font-size:.82rem; color:var(--primary); font-weight:600; }
+  td.amt { text-align:right; font-weight:600; color:#059669; font-family:monospace; }
+  .total-row td { background:var(--light); font-weight:700; border-top:2px solid var(--primary); }
+  .spinner { width:36px; height:36px; border:4px solid var(--border); border-top:4px solid var(--primary);
+             border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 1rem; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .loading { text-align:center; padding:2.5rem; color:#6B7280; }
+  .empty { text-align:center; padding:2.5rem; color:#6B7280; }
+  .empty .icon { font-size:2.5rem; margin-bottom:.75rem; }
+  .error-box { background:#FEF2F2; color:var(--red); padding:1rem; border-radius:8px;
+               border:1px solid #FECACA; margin-top:1rem; font-size:.875rem; }
+  #results-section { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📦 UPS Invoice Parser</h1>
+  <p>Upload multiple UPS invoice PDFs — extract tracking numbers &amp; net charges</p>
+</header>
+
+<div class="container">
+  <div class="card">
+    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <div style="font-size:2.5rem">📄</div>
+      <h3>Drop PDF files here or click to browse</h3>
+      <p>Multiple UPS invoice PDFs supported</p>
+    </div>
+    <input type="file" id="file-input" accept=".pdf" multiple>
+    <div id="file-list"></div>
+    <div class="actions">
+      <button class="btn btn-primary" id="process-btn" disabled onclick="processFiles()">⚡ Process Invoices</button>
+      <button class="btn btn-clear" onclick="clearAll()">✕ Clear</button>
+    </div>
+    <div id="err-box"></div>
+  </div>
+
+  <div class="card" id="results-section">
+    <div class="results-head">
+      <h2>Results <span class="badge" id="row-count">0 rows</span></h2>
+      <button class="btn btn-success" onclick="downloadExcel()">📥 Download Excel</button>
+    </div>
+    <div id="loading" class="loading" style="display:none">
+      <div class="spinner"></div><p>Processing…</p>
+    </div>
+    <div id="table-container">
+      <div class="empty"><div class="icon">📋</div><p>No data yet.</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let files = [], data = [];
+
+const drop = document.getElementById('drop-zone');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('over');
+  addFiles(Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf')));
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  addFiles(Array.from(e.target.files));
+  e.target.value = '';
+});
+
+function addFiles(newFiles) {
+  newFiles.forEach(f => { if (!files.find(x => x.name===f.name && x.size===f.size)) files.push(f); });
+  renderFiles();
+}
+
+function renderFiles() {
+  const list = document.getElementById('file-list');
+  document.getElementById('process-btn').disabled = files.length === 0;
+  list.innerHTML = files.map((f,i) => `
+    <div class="file-item">
+      <span>📄</span>
+      <span class="name">${esc(f.name)}</span>
+      <span class="size">${fmtSize(f.size)}</span>
+      <button onclick="files.splice(${i},1);renderFiles()" style="background:none;border:none;cursor:pointer;color:#9CA3AF">✕</button>
+    </div>`).join('');
+}
+
+function clearAll() {
+  files=[]; data=[];
+  renderFiles();
+  document.getElementById('results-section').style.display='none';
+  document.getElementById('err-box').innerHTML='';
+}
+
+async function processFiles() {
+  if (!files.length) return;
+  const rs = document.getElementById('results-section');
+  const ld = document.getElementById('loading');
+  const tc = document.getElementById('table-container');
+  const eb = document.getElementById('err-box');
+  const btn = document.getElementById('process-btn');
+
+  rs.style.display='block'; ld.style.display='block';
+  tc.innerHTML=''; eb.innerHTML=''; btn.disabled=true;
+
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f));
+
+  try {
+    const res = await fetch('/upload', { method:'POST', body:fd });
+    if (!res.ok) throw new Error('Server error ' + res.status);
+    const result = await res.json();
+    data = result.data || [];
+    ld.style.display='none';
+    if (result.errors?.length)
+      eb.innerHTML = `<div class="error-box"><b>⚠️ Issues:</b><br>${result.errors.map(esc).join('<br>')}</div>`;
+    renderTable(data);
+  } catch(e) {
+    ld.style.display='none';
+    eb.innerHTML = `<div class="error-box"><b>❌ Error:</b> ${esc(e.message)}</div>`;
+  } finally { btn.disabled=false; }
+}
+
+function renderTable(rows) {
+  const tc = document.getElementById('table-container');
+  document.getElementById('row-count').textContent = `${rows.length} row${rows.length!==1?'s':''}`;
+  if (!rows.length) {
+    tc.innerHTML='<div class="empty"><div class="icon">🔍</div><p>No net charges found. Ensure PDFs are UPS invoices.</p></div>';
+    return;
+  }
+  const total = rows.reduce((s,r) => s+r.net_charges, 0);
+  tc.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tracking No.</th><th>Description</th><th>Net Charges</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr>
+            <td class="trk">${esc(r.tracking_no)}</td>
+            <td>${esc(r.description)}</td>
+            <td class="amt">${r.net_charges.toFixed(2)}</td>
+          </tr>`).join('')}
+          <tr class="total-row"><td colspan="2">Total</td><td class="amt">${total.toFixed(2)}</td></tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function downloadExcel() {
+  if (!data.length) { alert('No data to download.'); return; }
+  try {
+    const res = await fetch('/download', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({data})
+    });
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href=url; a.download='ups_invoice_data.xlsx'; a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { alert('Download failed: '+e.message); }
+}
+
+function esc(s) { return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function fmtSize(b) { return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB'; }
+</script>
+</body>
+</html>
