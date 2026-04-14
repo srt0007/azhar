@@ -11,75 +11,29 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
 
 def extract_data_from_pdf(pdf_bytes, filename=''):
-    results = []
+    # Concatenate ALL pages into one text so cross-page sections are handled correctly
+    full_text = ""
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages:
-            text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
-            if not text:
-                continue
-            lines = [l.strip() for l in text.split('\n')]
+            full_text += (page.extract_text(x_tolerance=3, y_tolerance=3) or "") + "\n"
 
-            # Find tracking number on this page
-            tracking_no = None
-            for line in lines:
-                m = re.search(r'\b(1Z[A-Z0-9]{16})\b', line, re.IGNORECASE)
-                if m:
-                    tracking_no = m.group(1).upper()
-                    break
-            if not tracking_no:
-                continue
+    results = []
 
-            # Parse net charges section
-            in_charges = False
-            for line in lines:
-                if not line:
-                    continue
-                if re.search(r'\bNet\s*Charges\b', line, re.IGNORECASE):
-                    in_charges = True
-                    continue
-                if in_charges and re.match(r'^(Total Charges|Date\s|Page \d|Tracking)', line, re.IGNORECASE):
-                    in_charges = False
-                if not in_charges:
-                    continue
-                if line.lower() in ['description', 'net charges']:
-                    continue
+    # Each shipment section ends with "Total Charges for Shipment <1Z...>"
+    # Use these markers to slice the text into per-shipment blocks
+    section_end = re.compile(r'Total Charges for Shipment\s+(1Z[A-Z0-9]{16})', re.IGNORECASE)
+    matches = list(section_end.finditer(full_text))
+    if not matches:
+        return results
 
-                # Match "Some Description   123.45"
-                m = re.match(r'^(.+?)\s+([\d,]+\.\d{2})\s*$', line)
-                if m:
-                    desc = m.group(1).strip()
-                    skip = ['description', 'shipper', 'consignee', 'payor', 'comments', 'reference']
-                    if any(s in desc.lower() for s in skip):
-                        continue
-                    try:
-                        amount = float(m.group(2).replace(',', ''))
-                        if amount > 0:
-                            results.append({
-                                'tracking_no': tracking_no,
-                                'description': desc,
-                                'net_charges': round(amount, 2)
-                            })
-                    except ValueError:
-                        pass
+    prev = 0
+    for m in matches:
+        tracking_no = m.group(1).upper()
+        section = full_text[prev:m.end()]
+        prev = m.end()
 
-            # Fallback: known charge keywords
-            if not any(r['tracking_no'] == tracking_no for r in results):
-                known = ['Duty Amount', 'Value Added Tax', 'Import Tax', 'Customs Duty',
-                         'Fuel Surcharge', 'Peak Surcharge', 'Residential Surcharge',
-                         'Disbursement Fee', 'Handling Fee', 'Transportation Charge']
-                for charge in known:
-                    m = re.search(rf'{re.escape(charge)}\s+([\d,]+\.\d{{2}})', text, re.IGNORECASE)
-                    if m:
-                        try:
-                            amount = float(m.group(1).replace(',', ''))
-                            if amount > 0:
-                                results.append({
-                                    'tracking_no': tracking_no,
-                                    'description': charge,
-                                    'net_charges': round(amount, 2)
-                                })
-                        except ValueError:
-                            pass
+        for desc, amount in _parse_charges(section):
+            results.append({'tracking_no': tracking_no, 'description': desc, 'net_charges': amount})
 
     # Deduplicate
     seen = set()
@@ -90,6 +44,61 @@ def extract_data_from_pdf(pdf_bytes, filename=''):
             seen.add(key)
             unique.append(r)
     return unique
+
+
+def _parse_charges(section):
+    """Extract (description, amount) pairs from the Net Charges block of one shipment section."""
+    charges = []
+    lines = [l.strip() for l in section.split('\n')]
+    skip_words = ['description', 'shipper', 'consignee', 'payor', 'comments', 'reference', 'total']
+
+    in_charges = False
+    for line in lines:
+        if not line:
+            continue
+
+        if re.search(r'\bNet\s*Charges\b', line, re.IGNORECASE):
+            in_charges = True
+            continue
+
+        # Stop at the section-end marker
+        if re.match(r'Total Charges for Shipment', line, re.IGNORECASE):
+            break
+
+        if not in_charges:
+            continue
+        if line.lower() in ['description', 'net charges', 'description net charges']:
+            continue
+
+        # Match lines like: "Duty Amount   383.21"  or  "Value Added Tax   116.24"
+        m = re.match(r'^(.+?)\s+([\d,]+\.\d{2})\s*$', line)
+        if m:
+            desc = m.group(1).strip()
+            if any(s in desc.lower() for s in skip_words):
+                continue
+            try:
+                amount = round(float(m.group(2).replace(',', '')), 2)
+                if amount > 0:
+                    charges.append((desc, amount))
+            except ValueError:
+                pass
+
+    # Fallback to known keyword scan if the section parse found nothing
+    if not charges:
+        known = ['Duty Amount', 'Value Added Tax', 'Import Tax', 'Customs Duty',
+                 'Fuel Surcharge', 'Peak Surcharge', 'Residential Surcharge',
+                 'Disbursement Fee', 'Handling Fee', 'Transportation Charge']
+        for charge in known:
+            m = re.search(rf'{re.escape(charge)}\s+([\d,]+\.\d{{2}})', section, re.IGNORECASE)
+            if m:
+                try:
+                    amount = round(float(m.group(1).replace(',', '')), 2)
+                    if amount > 0:
+                        charges.append((charge, amount))
+                except ValueError:
+                    pass
+
+    return charges
 
 
 @app.route('/')
